@@ -18,24 +18,18 @@ namespace VideoProcessor
         {
             var videoLocation = ctx.GetInput<string>();
 
-            var bitRates = await ctx.CallActivityAsync<int[]>("A_GetBitRates", null);
-            var transCodeTasks = new List<Task<VideoFileInfo>>();
-
-            foreach (var rate in bitRates)
-            {
-                var info = new VideoFileInfo { BitRate = rate, Location = videoLocation };
-                var task = ctx.CallActivityAsync<VideoFileInfo>("A_TranscodeVideo", info);
-                transCodeTasks.Add(task);
-            }
-
             if (!ctx.IsReplaying)
                 log.LogInformation("About to call transcode activity");
             // take activitys as inputs and outputs - take a location of the file and return a string as output
-            var transcodeResults = await Task.WhenAll(transCodeTasks);
+
+            // call sub orchestrator
+            var transcodeResults =
+                await ctx.CallSubOrchestratorAsync<VideoFileInfo[]>("O_TranscodeVideo", videoLocation);
+            
             var transcodedLocation = transcodeResults
                 .OrderByDescending(r => r.BitRate)
                 .Select(r => r.Location)
-                .First();
+                .Last();
 
 
             if (!ctx.IsReplaying)
@@ -55,5 +49,28 @@ namespace VideoProcessor
                 WithIntro = withIntroLocation
             };
         }
+
+        [FunctionName("O_TranscodeVideo")]
+        public static async Task<VideoFileInfo[]> TranscodeVideo(
+            [OrchestrationTrigger] IDurableOrchestrationContext ctx,
+            ILogger log)
+        {
+            var videoLocation = ctx.GetInput<string>();
+
+            var bitRates = await ctx.CallActivityAsync<int[]>("A_GetBitRates", null);
+            var transCodeTasks = new List<Task<VideoFileInfo>>();
+
+            foreach (var rate in bitRates)
+            {
+                var info = new VideoFileInfo { BitRate = rate, Location = videoLocation };
+                var task = ctx.CallActivityAsync<VideoFileInfo>("A_TranscodeVideo", info);
+                transCodeTasks.Add(task);
+            }
+
+            var transcodeResults = await Task.WhenAll(transCodeTasks);
+
+            return transcodeResults;
+        }
+
     }
 }
